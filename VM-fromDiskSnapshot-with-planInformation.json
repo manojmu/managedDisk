@@ -1,0 +1,234 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "type": "string"
+    },
+    "snapshotResourceId": {
+      "type": "string",
+      "defaultValue": "/subscriptions/36228b9d-95c9-460d-a549-099261e363ea/resourceGroups/test-hanu/providers/Microsoft.Compute/snapshots/testCLIHANUvhd-snapshot",
+      "metadata": {
+        "description": "Resource ID of the Snapshot"
+      }
+    },
+    "vmNamePrefix": {
+      "type": "string",
+      "metadata": {
+        "description": "Virtual Machine Name Prefix"
+      }
+    },
+    "vmSize": {
+      "type": "string",
+      "defaultValue": "Standard_A1",
+      "metadata": {
+        "description": "Virtual Machine Size"
+      }
+    },
+    "virtualNetwork_name": {
+      "type": "string",
+      "metadata": {
+        "description": "New Virtual network name"
+      }
+    },
+    "planName": {
+      "type": "string"
+    },
+    "planPublisher": {
+      "type": "string"
+    },
+    "planProduct": {
+      "type": "string"
+    },
+    "osType": {
+      "type": "string",
+      "defaultValue": [
+        "Windows",
+        "Linux"
+      ]
+    },
+    "storageType": {
+      "type": "string",
+      "defaultValue": [
+        "Standard_LRS",
+        "Premium_LRS"
+      ],
+      "metadata": {
+        "description": "Storage Account Type"
+      }
+    }
+  },
+  "variables": {
+    "vmDisk": "[concat(parameters('vmNamePrefix'),'-disk')]",
+    "addressPrefix": "10.0.0.0/16",
+    "apiVersion": "2015-06-15",
+    "nicName": "[concat(parameters('vmNamePrefix'),'-NIC')]",
+    "pipName": "[concat(parameters('vmNamePrefix'),'-PIP')]",
+    "subnetName": "default",
+    "subnetPrefix": "10.0.0.0/24",
+    "subnetRef": "[concat(variables('vnetID'),'/subnets/',variables('subnetName'))]",
+    "vmStorageAccountContainerName": "vhds",
+    "vnetID": "[resourceId('Microsoft.Network/virtualNetworks',parameters('virtualNetwork_name'))]"
+
+  },
+    "resources": [
+      {
+        "type": "Microsoft.Compute/disks",
+        "name": "[variables('vmDisk')]",
+        "apiVersion": "2016-04-30-preview",
+        "location": "[parameters('location')]",
+        "properties": {
+          "accountType": "[parameters('storageType')]",
+          "osType": "[parameters('osType')]",
+          "creationData": {
+            "createOption": "Copy",
+            "sourceResourceId": "[parameters('snapshotResourceId')]"
+          },
+          "diskSizeGB": 128
+        },
+        "dependsOn": [ ]
+      },
+      {
+        "type": "Microsoft.Compute/virtualMachines",
+        "name": "[parameters('vmNamePrefix')]",
+        "apiVersion": "2016-04-30-preview",
+        "location": "[parameters('location')]",
+        "plan": {
+          "name": "[parameters('planName')]",
+          "publisher": "[parameters('planPublisher')]",
+          "product": "[parameters('planProduct')]"
+        },
+        "properties": {
+          "hardwareProfile": {
+            "vmSize": "[parameters('vmSize')]"
+          },
+          "storageProfile": {
+            "osDisk": {
+              "osType": "[parameters('osType')]",
+              "name": "[concat(variables('vmDisk'))]",
+              "createOption": "Attach",
+              "caching": "ReadWrite",
+              "managedDisk": {
+                "storageAccountType": "[parameters('storageType')]",
+                "id": "[resourceId('Microsoft.Compute/disks', variables('vmDisk'))]"
+              },
+              "diskSizeGB": 128
+            },
+            "dataDisks": [ ]
+          },
+          "networkProfile": {
+            "networkInterfaces": [
+              {
+                "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+              }
+            ]
+          }
+        },
+        "dependsOn": [
+          "[resourceId('Microsoft.Compute/disks', variables('vmDisk'))]",
+          "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+        ]
+      },
+      {
+        "type": "Microsoft.Network/networkInterfaces",
+        "name": "[variables('nicName')]",
+        "apiVersion": "2016-03-30",
+        "location": "[parameters('location')]",
+        "properties": {
+          "ipConfigurations": [
+            {
+              "name": "ipconfig1",
+              "properties": {
+                "privateIPAddress": "10.1.2.4",
+                "privateIPAllocationMethod": "Dynamic",
+                "publicIPAddress": {
+                  "id": "[resourceId('Microsoft.Network/publicIPAddresses',variables('pipName'))]"
+                },
+                "subnet": {
+                  "id": "[variables('subnetRef')]"
+                }
+              }
+            }
+          ],
+          "enableIPForwarding": false,
+          "networkSecurityGroup": {
+            "id": "[resourceId('Microsoft.Network/networkSecurityGroups', concat(parameters('vmNamePrefix'),'-NSG'))]"
+          }
+        },
+        "dependsOn": [
+          "[resourceId('Microsoft.Network/publicIPAddresses', variables('pipName'))]",
+          "[resourceId('Microsoft.Network/virtualNetworks', parameters('virtualNetwork_name'))]",
+          "[resourceId('Microsoft.Network/networkSecurityGroups', concat(parameters('vmNamePrefix'),'-NSG'))]"
+        ]
+      },
+      {
+        "type": "Microsoft.Network/networkSecurityGroups",
+        "name": "[concat(parameters('vmNamePrefix'),'-NSG')]",
+        "apiVersion": "2016-03-30",
+        "location": "[parameters('location')]",
+        "properties": {
+          "securityRules": [
+            {
+              "name": "default-allow-rdp",
+              "properties": {
+                "protocol": "*",
+                "sourcePortRange": "*",
+                "destinationPortRange": "3389",
+                "sourceAddressPrefix": "*",
+                "destinationAddressPrefix": "*",
+                "access": "Allow",
+                "priority": 110,
+                "direction": "Inbound"
+              }
+            },
+            {
+              "name": "default-allow-ssh",
+              "properties": {
+                "protocol": "*",
+                "sourcePortRange": "*",
+                "destinationPortRange": "22",
+                "sourceAddressPrefix": "*",
+                "destinationAddressPrefix": "*",
+                "access": "Allow",
+                "priority": 111,
+                "direction": "Inbound"
+              }
+            }
+          ]
+        },
+        "dependsOn": [ ]
+      },
+      {
+        "type": "Microsoft.Network/publicIPAddresses",
+        "name": "[variables('pipName')]",
+        "apiVersion": "2016-03-30",
+        "location": "[parameters('location')]",
+        "properties": {
+          "publicIPAllocationMethod": "Dynamic"
+           },
+        "dependsOn": [ ]
+      },
+      {
+        "type": "Microsoft.Network/virtualNetworks",
+        "name": "[parameters('virtualNetwork_name')]",
+        "apiVersion": "2016-03-30",
+        "location": "[parameters('location')]",
+        "properties": {
+          "addressSpace": {
+            "addressPrefixes": [
+              "[variables('addressPrefix')]"
+            ]
+          },
+          "subnets": [
+            {
+              "name": "[variables('subnetName')]",
+              "properties": {
+                "addressPrefix": "[variables('subnetPrefix')]"
+              }
+            }
+          ]
+        },
+        "dependsOn": [ ]
+      }
+    ]
+  }
